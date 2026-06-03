@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Novel Marketing Studio AI - Modern Edition</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class', // Enable class-based dark mode
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#8b5cf6',
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        serif: ['Playfair Display', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Google Fonts & FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,500;0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body {
+            -webkit-tap-highlight-color: transparent;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        
+        /* Scrollbar custom styling */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeIn {
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .loading-dots:after {
+            content: '.';
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        @keyframes dots {
+            0%, 20% { color: transparent; text-shadow: .25em 0 0 transparent, .5em 0 0 transparent; }
+            40% { color: inherit; text-shadow: .25em 0 0 transparent, .5em 0 0 transparent; }
+            60% { text-shadow: .25em 0 0 inherit, .5em 0 0 transparent; }
+            80%, 100% { text-shadow: .25em 0 0 inherit, .5em 0 0 inherit; }
+        }
+        
+        /* Glassmorphism helpers */
+        .glass { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+        .dark .glass { background: rgba(30, 41, 59, 0.7); }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-50 overflow-x-hidden selection:bg-indigo-500 selection:text-white">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const API_KEY = ""; // Sistem otomatis inject API Key
+
+        const DEFAULT_NOVELS = [
+            {
+                id: "n-1",
+                title: "Gerbang Kabut Hitam",
+                genre: "Fantasy",
+                synopsis: "Di sebuah dunia di mana matahari tidak lagi terbit, seorang gadis muda harus mencari pecahan kristal cahaya terakhir yang dijaga oleh monster bayangan.",
+                protagonist: "Aria Sylvan",
+                protagonistDesc: "Gadis yatim piatu berusia 17 tahun pemberani.",
+                antagonist: "Erebos Sang Bayangan",
+                antagonistDesc: "Entitas kegelapan kuno.",
+                targetAudience: "Remaja & Dewasa (15-35 tahun)",
+                status: "Draft",
+                createdAt: "2026-06-01T08:00:00.000Z"
+            }
+        ];
+
+        // Helper gradasi warna per genre
+        const getGenreGradient = (genre) => {
+            const lower = genre?.toLowerCase() || '';
+            if (lower.includes('fantasy')) return 'from-indigo-500 to-purple-600';
+            if (lower.includes('romance')) return 'from-rose-400 to-pink-500';
+            if (lower.includes('ceo') || lower.includes('billionaire')) return 'from-slate-700 to-slate-900 dark:from-slate-600 dark:to-slate-800';
+            if (lower.includes('thriller') || lower.includes('horror')) return 'from-red-600 to-red-900';
+            if (lower.includes('sci-fi')) return 'from-cyan-500 to-blue-600';
+            return 'from-primary to-secondary'; // default
+        };
+
+        // ==========================================
+        // SINKRONISASI CLOUD (GOOGLE APPS SCRIPT)
+        // ==========================================
+        async function fetchAppsScript(action, payload) {
+            const scriptUrl = localStorage.getItem("novel_studio_script_url");
+            if (!scriptUrl) return { success: false, error: "URL Apps Script belum diatur." };
+
+            try {
+                const response = await fetch(scriptUrl, {
+                    method: "POST",
+                    headers: { "Content-Type": "text/plain;charset=utf-8" },
+                    body: JSON.stringify({ action, data: payload })
+                });
+                const resText = await response.text();
+                const resJson = JSON.parse(resText);
+                return { success: resJson.success, error: resJson.error || "" };
+            } catch (err) {
+                console.error("Kesalahan jaringan:", err);
+                return { success: false, error: "Gagal menghubungkan ke database online." };
+            }
+        }
+
+        // ==========================================
+        // FUNGSI AI: TEKS & GAMBAR (GEMINI + IMAGEN)
+        // ==========================================
+        async function callGemini(prompt, systemInstruction = "", useSearch = false) {
+            try {
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined
+                };
+                if (useSearch) payload.tools = [{ "google_search": {} }];
+
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) return null;
+                const data = await response.json();
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+            } catch (err) {
+                console.error(err);
+                return null;
+            }
+        }
+
+        async function callImagen(promptText) {
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${API_KEY}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        instances: [{ prompt: promptText }],
+                        parameters: { sampleCount: 1 }
+                    })
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    return `data:image/png;base64,${data.predictions[0].bytesBase64Encoded}`;
+                }
+                return null;
+            } catch (err) {
+                console.error(err);
+                return null;
+            }
+        }
+
+        // ==========================================
+        // KOMPONEN LOGIN
+        // ==========================================
+        function LoginView({ onLogin, triggerToast }) {
+            const [username, setUsername] = useState("");
+            const [password, setPassword] = useState("");
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if (username === "admin" && password === "admin123") {
+                    onLogin({ username: "Admin", role: "admin" });
+                    triggerToast("Selamat datang, Admin!", "success");
+                } else if (username === "user" && password === "user123") {
+                    onLogin({ username: "User", role: "user" });
+                    triggerToast("Login berhasil sebagai User.", "success");
+                } else {
+                    triggerToast("Kredensial tidak valid!", "error");
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-indigo-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-10 w-full max-w-md shadow-2xl animate-fadeIn relative overflow-hidden">
+                        
+                        {/* Decorative blobs */}
+                        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-32 h-32 rounded-full bg-indigo-500/10 dark:bg-indigo-500/20 blur-2xl"></div>
+                        <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-32 h-32 rounded-full bg-purple-500/10 dark:bg-purple-500/20 blur-2xl"></div>
+
+                        <div className="text-center mb-8 relative z-10">
+                            <div className="w-16 h-16 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-2xl mx-auto flex items-center justify-center font-bold text-3xl text-white shadow-lg mb-4">N</div>
+                            <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Novel Studio AI</h2>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Akses generator pemasaran pintar Anda.</p>
+                        </div>
+
+                        <form onSubmit={handleLogin} className="space-y-5 relative z-10">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Username</label>
+                                <div className="relative">
+                                    <i className="fa-solid fa-user absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"></i>
+                                    <input 
+                                        type="text" 
+                                        value={username} onChange={(e) => setUsername(e.target.value)}
+                                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                                        placeholder="admin / user" required
+                                    />
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Password</label>
+                                <div className="relative">
+                                    <i className="fa-solid fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"></i>
+                                    <input 
+                                        type="password" 
+                                        value={password} onChange={(e) => setPassword(e.target.value)}
+                                        className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-10 pr-4 text-sm text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                                        placeholder="••••••••" required
+                                    />
+                                </div>
+                            </div>
+                            <button type="submit" className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white py-3.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-500/30 transition-all transform hover:-translate-y-0.5">
+                                Masuk &rarr;
+                            </button>
+                        </form>
+                        
+                        <div className="mt-8 p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed text-center relative z-10">
+                            Admin: <code className="font-bold text-indigo-500">admin</code>/<code className="font-bold text-indigo-500">admin123</code> <br/> User: <code className="font-bold text-indigo-500">user</code>/<code className="font-bold text-indigo-500">user123</code>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // APLIKASI UTAMA
+        // ==========================================
+        function App() {
+            // Theme State
+            const [isDark, setIsDark] = useState(() => {
+                const saved = localStorage.getItem('theme');
+                if (saved) return saved === 'dark';
+                return window.matchMedia('(prefers-color-scheme: dark)').matches;
+            });
+
+            const [user, setUser] = useState(() => {
+                const localUser = localStorage.getItem("novel_studio_user");
+                return localUser ? JSON.parse(localUser) : null;
+            });
+            const [novels, setNovels] = useState(() => {
+                const local = localStorage.getItem("novel_studio_novels");
+                return local ? JSON.parse(local) : DEFAULT_NOVELS;
+            });
+            const [characters, setCharacters] = useState(() => {
+                const local = localStorage.getItem("novel_studio_chars");
+                return local ? JSON.parse(local) : [];
+            });
+            const [syncQueue, setSyncQueue] = useState(() => {
+                const local = localStorage.getItem("novel_studio_sync_queue");
+                return local ? JSON.parse(local) : [];
+            });
+            
+            const [activeTab, setActiveTab] = useState("dashboard");
+            const [selectedNovelId, setSelectedNovelId] = useState(novels[0]?.id || "");
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+            const [isSyncing, setIsSyncing] = useState(false);
+            const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+
+            // Apply Theme
+            useEffect(() => {
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                    localStorage.setItem('theme', 'dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                    localStorage.setItem('theme', 'light');
+                }
+            }, [isDark]);
+
+            useEffect(() => {
+                if (user) localStorage.setItem("novel_studio_user", JSON.stringify(user));
+                else localStorage.removeItem("novel_studio_user");
+            }, [user]);
+
+            useEffect(() => {
+                localStorage.setItem("novel_studio_novels", JSON.stringify(novels));
+                if (novels.length > 0 && !selectedNovelId) setSelectedNovelId(novels[0].id);
+            }, [novels, selectedNovelId]);
+
+            useEffect(() => { localStorage.setItem("novel_studio_chars", JSON.stringify(characters)); }, [characters]);
+            useEffect(() => { localStorage.setItem("novel_studio_sync_queue", JSON.stringify(syncQueue)); }, [syncQueue]);
+
+            const triggerToast = (message, type = "success") => {
+                setToast({ show: true, message, type });
+                setTimeout(() => setToast({ show: false, message: "", type: "success" }), 3500);
+            };
+
+            const getSelectedNovel = () => novels.find(n => n.id === selectedNovelId) || novels[0] || null;
+
+            const copyToClipboard = (text) => {
+                const el = document.createElement('textarea');
+                el.value = text;
+                document.body.appendChild(el);
+                el.select();
+                document.execCommand('copy');
+                document.body.removeChild(el);
+                triggerToast("Disalin ke papan klip!", "success");
+            };
+
+            const addToSyncQueue = (action, payload) => {
+                const newItem = { id: "q-" + Date.now(), action, payload };
+                setSyncQueue(prev => [...prev, newItem]);
+                triggerToast("Tersimpan. Tekan Sync untuk unggah.", "info");
+            };
+
+            const triggerExplicitSync = async () => {
+                if (syncQueue.length === 0 || isSyncing) return;
+                setIsSyncing(true);
+                triggerToast("Mengunggah ke Sheets...", "info");
+
+                let processedIds = [];
+                for (const item of syncQueue) {
+                    const res = await fetchAppsScript(item.action, item.payload);
+                    if (res.success) processedIds.push(item.id);
+                    else {
+                        triggerToast(`Gagal: ${res.error}`, "error");
+                        break;
+                    }
+                }
+
+                if (processedIds.length > 0) {
+                    setSyncQueue(prev => prev.filter(item => !processedIds.includes(item.id)));
+                    triggerToast("Sinkronisasi berhasil!", "success");
+                }
+                setIsSyncing(false);
+            };
+
+            if (!user) return (
+                <div className="relative min-h-screen">
+                    {toast.show && (
+                        <div className={`fixed top-4 right-4 z-50 flex items-center px-4 py-3 rounded-xl shadow-2xl border ${toast.type === "error" ? "bg-red-50 text-red-600 border-red-200 dark:bg-red-900/90 dark:border-red-500 dark:text-red-200" : "bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-900/90 dark:border-emerald-500 dark:text-emerald-200"}`}>
+                            <span className="text-xs font-semibold">{toast.message}</span>
+                        </div>
+                    )}
+                    <LoginView onLogin={setUser} triggerToast={triggerToast} />
+                </div>
+            );
+
+            const isAdmin = user.role === "admin";
+            const toggleTheme = () => setIsDark(!isDark);
+
+            return (
+                <div className="min-h-screen flex flex-col lg:flex-row relative">
+                    {toast.show && (
+                        <div className={`fixed top-4 right-4 left-4 sm:left-auto z-50 flex items-center px-4 py-3 rounded-xl shadow-2xl border transition-all duration-300 ${toast.type === "error" ? "bg-red-50 text-red-600 border-red-200 dark:bg-red-900/90 dark:border-red-500 dark:text-red-200" : "bg-indigo-50 text-indigo-600 border-indigo-200 dark:bg-indigo-900/90 dark:border-indigo-500 dark:text-indigo-200"}`}>
+                            <span className="text-xs font-semibold">{toast.message}</span>
+                        </div>
+                    )}
+
+                    {/* Mobile Header */}
+                    <header className="lg:hidden h-16 glass border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 sticky top-0 z-30">
+                        <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-500 dark:text-slate-400 hover:text-indigo-500">
+                            <i className="fa-solid fa-bars text-xl"></i>
+                        </button>
+                        <span className="font-extrabold text-sm tracking-tight text-slate-800 dark:text-white">Novel Studio</span>
+                        <button onClick={toggleTheme} className="p-2 text-slate-500 dark:text-slate-400">
+                            <i className={`fa-solid ${isDark ? 'fa-sun' : 'fa-moon'} text-lg`}></i>
+                        </button>
+                    </header>
+
+                    {/* Sidebar Backdrop */}
+                    <div className={`fixed inset-0 z-40 transition-opacity duration-300 ${isSidebarOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+                        <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>
+                    </div>
+
+                    {/* Sidebar Drawer */}
+                    <aside className={`w-72 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0 h-screen fixed lg:sticky top-0 z-50 transition-transform duration-300 ease-in-out ${isSidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'}`}>
+                        <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                            <div className="flex items-center space-x-3">
+                                <div className="w-10 h-10 bg-gradient-to-tr from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center font-bold text-lg text-white shadow-lg">N</div>
+                                <div>
+                                    <h1 className="font-bold text-sm text-slate-800 dark:text-white">NOVEL STUDIO</h1>
+                                    <span className="text-[9px] text-emerald-500 font-bold tracking-widest block">{user.role.toUpperCase()} ACCESS</span>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white">
+                                <i className="fa-solid fa-xmark text-lg"></i>
+                            </button>
+                        </div>
+
+                        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2">Fokus Novel Utama</label>
+                            <select value={selectedNovelId} onChange={(e) => setSelectedNovelId(e.target.value)} className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2.5 text-xs text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer transition-all">
+                                {novels.map(n => (<option key={n.id} value={n.id}>{n.title}</option>))}
+                                {novels.length === 0 && <option value="">Belum ada novel</option>}
+                            </select>
+                        </div>
+
+                        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-1.5">
+                            <SidebarLink active={activeTab === "dashboard"} label="Dashboard" icon="fa-chart-pie" onClick={() => { setActiveTab("dashboard"); setIsSidebarOpen(false); }} />
+                            
+                            {isAdmin && (
+                                <>
+                                    <div className="pt-5 pb-2"><span className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Manajemen Konten</span></div>
+                                    <SidebarLink active={activeTab === "novels"} label="Novel Manager" icon="fa-book" onClick={() => { setActiveTab("novels"); setIsSidebarOpen(false); }} />
+                                    <SidebarLink active={activeTab === "characters"} label="Character Studio" icon="fa-user-astronaut" onClick={() => { setActiveTab("characters"); setIsSidebarOpen(false); }} />
+                                </>
+                            )}
+                            
+                            <div className="pt-5 pb-2"><span className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">AI Generators</span></div>
+                            <SidebarLink active={activeTab === "social"} label="Social Post Generator" icon="fa-share-nodes" onClick={() => { setActiveTab("social"); setIsSidebarOpen(false); }} />
+                            <SidebarLink active={activeTab === "interview"} label="Wawancara Karakter" icon="fa-microphone-lines" onClick={() => { setActiveTab("interview"); setIsSidebarOpen(false); }} />
+                            <SidebarLink active={activeTab === "hooks"} label="Hook Generator" icon="fa-quote-left" onClick={() => { setActiveTab("hooks"); setIsSidebarOpen(false); }} />
+                            <SidebarLink active={activeTab === "covers"} label="Cover Generator" icon="fa-image" onClick={() => { setActiveTab("covers"); setIsSidebarOpen(false); }} />
+                            
+                            {isAdmin && (
+                                <>
+                                    <div className="pt-5 pb-2"><span className="px-3 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Sistem</span></div>
+                                    <SidebarLink active={activeTab === "settings"} label="Settings & Integration" icon="fa-sliders" onClick={() => { setActiveTab("settings"); setIsSidebarOpen(false); }} />
+                                </>
+                            )}
+                        </nav>
+
+                        <div className="p-5 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900">
+                            <button onClick={() => { setUser(null); setActiveTab("dashboard"); }} className="w-full text-left px-4 py-2.5 text-xs text-rose-500 dark:text-rose-400 font-bold hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-xl flex items-center space-x-3 transition-colors">
+                                <i className="fa-solid fa-arrow-right-from-bracket"></i>
+                                <span>Logout Keluar</span>
+                            </button>
+                        </div>
+                    </aside>
+
+                    {/* Main Workspace */}
+                    <div className="flex-1 flex flex-col min-w-0">
+                        {/* Desktop Header */}
+                        <header className="hidden lg:flex h-16 glass border-b border-slate-200 dark:border-slate-800 items-center justify-between px-8 shrink-0 z-20">
+                            <div>
+                                <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest block">Proyek Pemasaran</span>
+                                <h2 className="text-sm font-bold text-slate-800 dark:text-white">{getSelectedNovel() ? getSelectedNovel().title : "Tidak Ada Novel"}</h2>
+                            </div>
+                            <div className="flex items-center space-x-4">
+                                <button onClick={toggleTheme} className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                                    <i className={`fa-solid ${isDark ? 'fa-sun' : 'fa-moon'} text-sm`}></i>
+                                </button>
+                                {syncQueue.length > 0 && isAdmin && (
+                                    <button onClick={triggerExplicitSync} disabled={isSyncing} className="bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-500/30 px-4 py-2 rounded-full text-xs font-bold transition-all flex items-center space-x-2 shadow-sm">
+                                        <i className={`fa-solid fa-rotate ${isSyncing ? 'animate-spin' : ''}`}></i>
+                                        <span>Sync Sheets ({syncQueue.length})</span>
+                                    </button>
+                                )}
+                                <div className="h-8 border-l border-slate-300 dark:border-slate-700"></div>
+                                <div className="flex items-center space-x-2">
+                                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold shadow-md">
+                                        {user.username.charAt(0).toUpperCase()}
+                                    </div>
+                                    <span className="text-xs text-slate-700 dark:text-slate-300 font-bold hidden xl:block">{user.username}</span>
+                                </div>
+                            </div>
+                        </header>
+
+                        <main className="flex-1 p-4 sm:p-8 overflow-y-auto">
+                            {syncQueue.length > 0 && isAdmin && (
+                                <div className="lg:hidden mb-6 p-4 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-700/50 rounded-2xl flex items-center justify-between shadow-sm">
+                                    <div className="flex items-center space-x-3">
+                                        <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400"><i className="fa-solid fa-cloud-arrow-up text-xs"></i></div>
+                                        <span className="text-xs text-amber-800 dark:text-amber-200 font-bold">Ada {syncQueue.length} data antre</span>
+                                    </div>
+                                    <button onClick={triggerExplicitSync} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md">Sync</button>
+                                </div>
+                            )}
+
+                            {activeTab === "dashboard" && <DashboardView novels={novels} characters={characters} getSelectedNovel={getSelectedNovel} isAdmin={isAdmin} />}
+                            {activeTab === "novels" && isAdmin && <NovelManagerView novels={novels} setNovels={setNovels} triggerToast={triggerToast} addToSyncQueue={addToSyncQueue} />}
+                            {activeTab === "characters" && isAdmin && <CharacterStudioView novels={novels} selectedNovel={getSelectedNovel()} characters={characters} setCharacters={setCharacters} triggerToast={triggerToast} />}
+                            
+                            {/* AI Generators */}
+                            {activeTab === "social" && <SocialGeneratorView selectedNovel={getSelectedNovel()} triggerToast={triggerToast} addToSyncQueue={addToSyncQueue} copyToClipboard={copyToClipboard} />}
+                            {activeTab === "interview" && <CharacterInterviewView selectedNovel={getSelectedNovel()} characters={characters} triggerToast={triggerToast} addToSyncQueue={addToSyncQueue} copyToClipboard={copyToClipboard} />}
+                            {activeTab === "hooks" && <HookGeneratorView selectedNovel={getSelectedNovel()} triggerToast={triggerToast} addToSyncQueue={addToSyncQueue} copyToClipboard={copyToClipboard} />}
+                            {activeTab === "covers" && <CoverGeneratorView selectedNovel={getSelectedNovel()} triggerToast={triggerToast} />}
+                            
+                            {activeTab === "settings" && isAdmin && <SettingsView triggerToast={triggerToast} />}
+                        </main>
+                    </div>
+                </div>
+            );
+        }
+
+        function SidebarLink({ active, label, icon, onClick }) {
+            return (
+                <button
+                    onClick={onClick}
+                    className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition-all flex items-center space-x-3 ${
+                        active ? "bg-indigo-600 text-white shadow-lg shadow-indigo-500/30" : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white"
+                    }`}
+                >
+                    <i className={`fa-solid ${icon} w-5 text-center ${active ? 'text-indigo-200' : ''}`}></i>
+                    <span>{label}</span>
+                </button>
+            );
+        }
+
+        // ==========================================
+        // DASHBOARD
+        // ==========================================
+        function DashboardView({ novels, characters, getSelectedNovel, isAdmin }) {
+            const currentNovel = getSelectedNovel();
+            const bgClass = currentNovel ? getGenreGradient(currentNovel.genre) : 'from-slate-700 to-slate-800';
+
+            return (
+                <div className="space-y-8 animate-fadeIn max-w-6xl mx-auto">
+                    <div>
+                        <h2 className="text-2xl sm:text-3xl font-black text-slate-800 dark:text-white tracking-tight">Dashboard Promosi</h2>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Rancang kampanye novel Anda secara real-time.</p>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+                        <MetricCard title="Total Novel" value={novels.length} icon="fa-book" color="text-indigo-600 dark:text-indigo-400" bg="bg-indigo-50 dark:bg-indigo-500/10" />
+                        {isAdmin && (
+                            <MetricCard title="Karakter" value={characters.length} icon="fa-user-group" color="text-purple-600 dark:text-purple-400" bg="bg-purple-50 dark:bg-purple-500/10" />
+                        )}
+                        <MetricCard title="Status Akses" value={isAdmin ? "ADMIN" : "USER"} icon="fa-shield-halved" color="text-emerald-600 dark:text-emerald-400" bg="bg-emerald-50 dark:bg-emerald-500/10" isStatus />
+                    </div>
+                    
+                    <div className={`rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden bg-gradient-to-br ${bgClass} text-white`}>
+                        {/* Abstract background shapes */}
+                        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-64 h-64 rounded-full bg-white opacity-10 blur-3xl mix-blend-overlay pointer-events-none"></div>
+                        <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-48 h-48 rounded-full bg-black opacity-20 blur-2xl mix-blend-overlay pointer-events-none"></div>
+                        
+                        <div className="relative z-10">
+                            <div className="flex items-center space-x-2 mb-6">
+                                <span className="flex h-3 w-3 relative">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                                </span>
+                                <h3 className="font-bold text-sm uppercase tracking-widest text-white/90">Novel Fokus Saat Ini</h3>
+                            </div>
+                            
+                            {currentNovel ? (
+                                <div className="space-y-4">
+                                    <h1 className="text-3xl sm:text-5xl font-black font-serif-novel leading-tight drop-shadow-md">{currentNovel.title}</h1>
+                                    <span className="inline-block px-3 py-1 bg-white/20 backdrop-blur-md rounded-lg text-xs font-bold uppercase tracking-wider border border-white/30">{currentNovel.genre}</span>
+                                    <p className="text-sm sm:text-base text-white/90 leading-relaxed font-light max-w-3xl mt-4 drop-shadow-sm">{currentNovel.synopsis}</p>
+                                </div>
+                            ) : <p className="text-sm text-white/80">Belum ada novel terpilih. Silakan daftarkan di Novel Manager.</p>}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function MetricCard({ title, value, icon, color, bg, isStatus }) {
+            return (
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-5 sm:p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center justify-between mb-4">
+                        <span className="text-[10px] sm:text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">{title}</span>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${bg} ${color}`}>
+                            <i className={`fa-solid ${icon} text-sm`}></i>
+                        </div>
+                    </div>
+                    <h4 className={`text-2xl sm:text-3xl font-black ${color}`}>
+                        {value}
+                    </h4>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // NOVEL MANAGER (ADMIN)
+        // ==========================================
+        function NovelManagerView({ novels, setNovels, triggerToast, addToSyncQueue }) {
+            const [form, setForm] = useState({ id: "", title: "", genre: "Fantasy", synopsis: "" });
+            const [showModal, setShowModal] = useState(false);
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                const newNovel = { ...form, id: "n-" + Date.now(), createdAt: new Date().toISOString() };
+                setNovels([newNovel, ...novels]);
+                addToSyncQueue("add_novel", newNovel);
+                setShowModal(false);
+            };
+            return (
+                <div className="space-y-6 animate-fadeIn max-w-6xl mx-auto">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                        <h2 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">Manajemen Novel</h2>
+                        <button onClick={() => setShowModal(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-lg shadow-indigo-500/30 transition-transform transform hover:-translate-y-0.5">
+                            <i className="fa-solid fa-plus mr-2"></i>Tambah Novel Baru
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {novels.map(novel => {
+                            const bgClass = getGenreGradient(novel.genre);
+                            return (
+                                <div key={novel.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all group flex flex-col">
+                                    <div className={`h-24 w-full bg-gradient-to-r ${bgClass} opacity-80 group-hover:opacity-100 transition-opacity`}></div>
+                                    <div className="p-6 -mt-8 flex-1 flex flex-col bg-white dark:bg-slate-800 rounded-t-3xl">
+                                        <div className="flex justify-between items-start mb-3">
+                                            <span className="px-3 py-1 bg-indigo-50 dark:bg-slate-700 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold rounded-lg uppercase tracking-wider border border-indigo-100 dark:border-slate-600 shadow-sm">{novel.genre}</span>
+                                        </div>
+                                        <h3 className="font-black text-lg text-slate-800 dark:text-white leading-tight font-serif-novel">{novel.title}</h3>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-3 leading-relaxed flex-1">{novel.synopsis}</p>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    {showModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setShowModal(false)}></div>
+                            <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 w-full max-w-md space-y-6 shadow-2xl relative z-10 transform transition-all animate-fadeIn">
+                                <h3 className="text-lg font-black text-slate-800 dark:text-white">Daftarkan Novel Baru</h3>
+                                <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Judul Novel</label>
+                                        <input type="text" placeholder="Masukkan judul..." value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" required />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Genre</label>
+                                        <select value={form.genre} onChange={(e) => setForm({ ...form, genre: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer">
+                                            <option value="Fantasy">Fantasy</option>
+                                            <option value="Romance">Romance</option>
+                                            <option value="CEO/Billionaire">CEO / Billionaire</option>
+                                            <option value="Sci-Fi">Sci-Fi</option>
+                                            <option value="Horror/Thriller">Horror / Thriller</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Sinopsis</label>
+                                        <textarea placeholder="Garis besar cerita..." value={form.synopsis} onChange={(e) => setForm({ ...form, synopsis: e.target.value })} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-800 dark:text-white h-24 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                                    </div>
+                                    <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200 dark:border-slate-700">
+                                        <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-white rounded-xl text-xs font-bold transition-colors">Batal</button>
+                                        <button type="submit" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-indigo-500/30 transition-colors">Simpan</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==========================================
+        // CHARACTER STUDIO (ADMIN)
+        // ==========================================
+        function CharacterStudioView({ selectedNovel, characters, setCharacters, triggerToast }) {
+            const [name, setName] = useState("");
+            const [desc, setDesc] = useState("");
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if(!name || !selectedNovel) return;
+                setCharacters([{ id: "c-" + Date.now(), novelId: selectedNovel.id, name, description: desc }, ...characters]);
+                triggerToast("Profil Karakter disimpan.");
+                setName(""); setDesc("");
+            };
+            const filtered = characters.filter(c => c.novelId === selectedNovel?.id);
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn max-w-6xl mx-auto">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm lg:col-span-5 flex flex-col">
+                        <div className="mb-6">
+                            <h3 className="font-black text-lg text-slate-800 dark:text-white">Desain Profil Karakter</h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Tambahkan entitas penting ke dalam semesta novel Anda.</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-5 text-sm flex-1 flex flex-col">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Nama Karakter</label>
+                                <input type="text" placeholder="Contoh: Aria Sylvan" value={name} onChange={(e) => setName(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500" required/>
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-1.5">Deskripsi, Visual & Sifat</label>
+                                <textarea placeholder="Deskripsikan penampilan, motivasi, dan rahasia karakter..." value={desc} onChange={(e) => setDesc(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3 text-slate-800 dark:text-white h-full min-h-[120px] focus:outline-none focus:ring-2 focus:ring-indigo-500" required/>
+                            </div>
+                            <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3.5 rounded-xl font-bold shadow-lg shadow-indigo-500/30 transition-transform transform hover:-translate-y-0.5"><i className="fa-solid fa-user-plus mr-2"></i>Simpan Karakter</button>
+                        </form>
+                    </div>
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm lg:col-span-7 flex flex-col">
+                        <h3 className="font-black text-lg text-slate-800 dark:text-white mb-6">Karakter Terdaftar di Semesta Ini</h3>
+                        <div className="space-y-3 overflow-y-auto flex-1 pr-2">
+                            {filtered.map(c => (
+                                <div key={c.id} className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl flex items-start space-x-4 transition-colors hover:border-indigo-300 dark:hover:border-indigo-700">
+                                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-300 shrink-0 border border-slate-300 dark:border-slate-600">
+                                        <i className="fa-solid fa-user text-sm"></i>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-slate-800 dark:text-white text-sm">{c.name}</h4>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">{c.description}</p>
+                                    </div>
+                                </div>
+                            ))}
+                            {filtered.length === 0 && (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 py-10 opacity-60">
+                                    <i className="fa-solid fa-ghost text-4xl mb-3"></i>
+                                    <p className="text-sm font-medium">Belum ada entitas yang diciptakan.</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // WAWANCARA KARAKTER (INTERVIEW)
+        // ==========================================
+        function CharacterInterviewView({ selectedNovel, characters, triggerToast, addToSyncQueue, copyToClipboard }) {
+            const filteredChars = characters.filter(c => c.novelId === selectedNovel?.id);
+            const [selectedCharId, setSelectedCharId] = useState(filteredChars[0]?.id || "");
+            const [tone, setTone] = useState("Investigatif & Misterius");
+            const [loading, setLoading] = useState(false);
+            const [interviewData, setInterviewData] = useState(null);
+
+            useEffect(() => {
+                if (filteredChars.length > 0 && !selectedCharId) setSelectedCharId(filteredChars[0].id);
+            }, [filteredChars]);
+
+            const handleGenerate = async () => {
+                if (!selectedNovel) return triggerToast("Pilih novel terlebih dahulu!", "error");
+                if (!selectedCharId) return triggerToast("Daftarkan karakter terlebih dahulu di Character Studio!", "error");
+                
+                setLoading(true); setInterviewData(null);
+                const char = filteredChars.find(c => c.id === selectedCharId);
+
+                const prompt = `Anda berperan sebagai karakter fiksi bernama ${char.name} dengan sifat: ${char.description}.
+                Konteks Cerita (Novel ${selectedNovel.title}): ${selectedNovel.synopsis}.
+                Seorang jurnalis sedang mewawancarai Anda dengan gaya ${tone}.
+                
+                Buatkan transkrip wawancara 3 pertanyaan eksklusif. Berikan respons MURNI format JSON dengan struktur:
+                {
+                    "headline": "Judul wawancara yang clickbait",
+                    "qna": [
+                        { "q": "Pertanyaan jurnalis...", "a": "Jawaban karakter..." }
+                    ]
+                }`;
+
+                const res = await callGemini(prompt, "Hanya kembalikan objek JSON yang valid.", false);
+                if (res) {
+                    try {
+                        const start = res.indexOf("{");
+                        const end = res.lastIndexOf("}") + 1;
+                        const data = JSON.parse(res.substring(start, end));
+                        setInterviewData(data);
+                        addToSyncQueue("save_content", { id: "c-" + Date.now(), novelId: selectedNovel.id, type: `Interview`, content: data.headline });
+                        triggerToast("Sesi wawancara eksklusif berhasil dirumuskan!");
+                    } catch(e) {
+                        triggerToast("Gagal memformat respons AI, coba lagi.", "error");
+                    }
+                } else {
+                    triggerToast("Koneksi API gagal.", "error");
+                }
+                setLoading(false);
+            };
+
+            const compileTextToCopy = () => {
+                if (!interviewData) return "";
+                let text = `🔥 ${interviewData.headline}\n\n`;
+                interviewData.qna.forEach(item => { text += `🎙️ Jurnalis: ${item.q}\n👤 Karakter: ${item.a}\n\n`; });
+                return text;
+            };
+
+            return (
+                <div className="space-y-6 animate-fadeIn max-w-4xl mx-auto">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm">
+                        <div className="mb-6 border-b border-slate-200 dark:border-slate-700 pb-4">
+                            <h3 className="font-black text-lg text-slate-800 dark:text-white flex items-center space-x-3">
+                                <span className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"><i className="fa-solid fa-microphone-lines text-sm"></i></span>
+                                <span>Generator Wawancara Karakter</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">Simulasikan tanya-jawab eksklusif yang natural dengan karakter fiksi Anda.</p>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 text-sm mb-6">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2">Pilih Karakter</label>
+                                <select value={selectedCharId} onChange={(e) => setSelectedCharId(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-shadow cursor-pointer">
+                                    {filteredChars.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                    {filteredChars.length === 0 && <option value="">Belum ada karakter</option>}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2">Gaya Jurnalis (Tone)</label>
+                                <select value={tone} onChange={(e) => setTone(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-shadow cursor-pointer">
+                                    <option value="Investigatif & Memojokkan">Investigatif & Memojokkan</option>
+                                    <option value="Santai & Menggali Latar Belakang">Santai & Kekeluargaan</option>
+                                    <option value="Fokus pada Emosi & Percintaan">Fokus pada Konflik Batin</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button onClick={handleGenerate} disabled={loading || filteredChars.length === 0} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-emerald-500/30 disabled:opacity-50 disabled:cursor-not-allowed transform hover:-translate-y-0.5 flex justify-center items-center">
+                            {loading ? <span className="loading-dots">Mengonfirmasi Jadwal Wawancara</span> : <span><i className="fa-solid fa-play mr-2"></i>Mulai Wawancara</span>}
+                        </button>
+                    </div>
+
+                    {interviewData && (
+                        <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm space-y-6">
+                            <div className="flex justify-between items-start border-b border-slate-200 dark:border-slate-700 pb-4">
+                                <h4 className="text-lg font-black text-slate-800 dark:text-white font-serif-novel leading-tight pr-4">{interviewData.headline}</h4>
+                                <button onClick={() => copyToClipboard(compileTextToCopy())} className="text-xs text-emerald-600 dark:text-emerald-400 font-bold hover:underline shrink-0 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1.5 rounded-lg transition-colors"><i className="fa-solid fa-copy mr-1.5"></i>Salin Teks</button>
+                            </div>
+                            
+                            <div className="space-y-6">
+                                {interviewData.qna.map((item, idx) => (
+                                    <div key={idx} className="space-y-3">
+                                        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 rounded-2xl rounded-tl-none ml-2 sm:ml-4 shadow-sm w-11/12 sm:w-5/6">
+                                            <span className="font-bold text-slate-500 dark:text-slate-400 block mb-1 text-[10px] uppercase tracking-widest flex items-center"><i className="fa-solid fa-user-tie mr-1.5"></i>Jurnalis</span>
+                                            <p className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed font-medium">{item.q}</p>
+                                        </div>
+                                        <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/30 p-4 rounded-2xl rounded-tr-none mr-2 sm:mr-4 ml-auto shadow-sm w-11/12 sm:w-5/6 text-right">
+                                            <span className="font-bold text-indigo-600 dark:text-indigo-400 block mb-1 text-[10px] uppercase tracking-widest flex items-center justify-end">Karakter<i className="fa-solid fa-user ml-1.5"></i></span>
+                                            <p className="text-sm text-slate-800 dark:text-slate-200 leading-relaxed">{item.a}</p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ==========================================
+        // SOCIAL MEDIA GENERATOR (+ IMAGE GENERATOR)
+        // ==========================================
+        function SocialGeneratorView({ selectedNovel, triggerToast, addToSyncQueue, copyToClipboard }) {
+            const [platform, setPlatform] = useState("Instagram");
+            const [tone, setTone] = useState("Dramatis & Penasaran");
+            const [loading, setLoading] = useState(false);
+            const [imgLoading, setImgLoading] = useState(false);
+            const [result, setResult] = useState(null);
+            const [image, setImage] = useState("");
+
+            const handleGenerate = async () => {
+                if (!selectedNovel) return triggerToast("Pilih novel terlebih dahulu!", "error");
+                setLoading(true); setImage(""); setResult(null);
+
+                const prompt = `Buatkan konten promosi viral untuk platform ${platform} dengan gaya (tone) ${tone}.
+                Target Novel: Judul: ${selectedNovel.title}, Genre: ${selectedNovel.genre}, Sinopsis: ${selectedNovel.synopsis}.
+                Berikan format keluaran murni berupa JSON yang persis seperti ini (tanpa teks luar):
+                {
+                    "caption": "Teks caption lengkap dengan spasi dan hashtag siap posting...",
+                    "image_prompt": "Sebuah kalimat prompt bahasa inggris untuk image generator AI yang mendeskripsikan gambar latar belakang pendukung postingan (Cinematic, highly detailed, photorealistic)."
+                }`;
+
+                const res = await callGemini(prompt, "Hanya kembalikan objek JSON yang valid.", false);
+                if (res) {
+                    try {
+                        const start = res.indexOf("{");
+                        const end = res.lastIndexOf("}") + 1;
+                        const data = JSON.parse(res.substring(start, end));
+                        setResult(data);
+                        addToSyncQueue("save_content", { id: "c-" + Date.now(), novelId: selectedNovel.id, type: `Social (${platform})`, content: data.caption });
+                        triggerToast("Konten dan panduan gambar berhasil dirumuskan!");
+                    } catch(e) {
+                        triggerToast("Gagal membaca respons AI, mencoba ulang...", "error");
+                    }
+                } else {
+                    triggerToast("Koneksi API gagal.", "error");
+                }
+                setLoading(false);
+            };
+
+            const handleGenerateImage = async () => {
+                if (!result || !result.image_prompt) return;
+                setImgLoading(true);
+                triggerToast("Memproses AI Visual (Imagen 4.0)...", "info");
+                
+                // Gunakan Imagen 4.0 sesuai aturan instruksi untuk Image Generation
+                const imgRes = await callImagen(result.image_prompt);
+                if (imgRes) {
+                    setImage(imgRes);
+                    triggerToast("Gambar promosi berhasil dibuat!", "success");
+                } else {
+                    setImage("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80");
+                    triggerToast("Fallback gambar demo ditampilkan.", "info");
+                }
+                setImgLoading(false);
+            };
+
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn max-w-6xl mx-auto">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm lg:col-span-5 flex flex-col space-y-6">
+                        <div>
+                            <h3 className="font-black text-lg text-slate-800 dark:text-white flex items-center space-x-3">
+                                <span className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 flex items-center justify-center"><i className="fa-solid fa-share-nodes text-sm"></i></span>
+                                <span>Social Post Engine</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">Hasilkan kombinasi *copywriting* dan visual estetis menggunakan *Integrated AI* untuk IG, TikTok, FB, atau X.</p>
+                        </div>
+
+                        <div className="space-y-4 text-sm flex-1">
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2">Pilih Platform</label>
+                                <select value={platform} onChange={(e) => setPlatform(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                                    <option value="Instagram">Instagram (Visual + Caption)</option>
+                                    <option value="TikTok">TikTok (Voice Over Script)</option>
+                                    <option value="Facebook">Facebook (Storytelling)</option>
+                                    <option value="Twitter/X">Twitter/X (Viral Thread)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2">Gaya Bahasa (Tone)</label>
+                                <select value={tone} onChange={(e) => setTone(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer">
+                                    <option value="Dramatis & Penasaran">Dramatis & Bikin Penasaran</option>
+                                    <option value="Romantis & Emosional">Romantis & Puitis</option>
+                                    <option value="Gelap & Misterius">Gelap, Tegang & Misterius</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button onClick={handleGenerate} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-blue-500/30 transform hover:-translate-y-0.5 flex justify-center items-center">
+                            {loading ? <span className="loading-dots">Menyusun Strategi</span> : <span><i className="fa-solid fa-wand-magic-sparkles mr-2"></i>Hasilkan Teks & Konsep Visual</span>}
+                        </button>
+                    </div>
+
+                    <div className="lg:col-span-7 flex flex-col space-y-6">
+                        {result ? (
+                            <>
+                                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col h-full">
+                                    <div className="flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-3 mb-4">
+                                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest"><i className="fa-solid fa-pen-nib mr-2"></i>Rancangan Teks</span>
+                                        <button onClick={() => copyToClipboard(result.caption)} className="text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 px-3 py-1.5 rounded-lg font-bold transition-colors">Salin</button>
+                                    </div>
+                                    <div className="p-4 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm whitespace-pre-wrap text-slate-700 dark:text-slate-300 leading-relaxed overflow-y-auto custom-scrollbar flex-1 max-h-60">
+                                        {result.caption}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm flex flex-col relative overflow-hidden group">
+                                    <div className="flex justify-between items-center mb-4 z-10 relative">
+                                        <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-widest"><i className="fa-solid fa-paintbrush mr-2"></i>Integrated Web AI Image</span>
+                                        <button onClick={handleGenerateImage} disabled={imgLoading} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center space-x-2">
+                                            {imgLoading ? <span className="loading-dots px-4">Merender</span> : <span>Render Gambar Postingan</span>}
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="w-full bg-slate-100 dark:bg-slate-900 rounded-2xl flex items-center justify-center overflow-hidden min-h-[280px] relative z-10 border border-slate-200 dark:border-slate-700">
+                                        {image ? (
+                                            <img src={image} alt="Generated visual" className="w-full h-full object-cover transition-transform duration-700 hover:scale-105" />
+                                        ) : (
+                                            <div className="text-center text-slate-400 dark:text-slate-500 p-6">
+                                                <i className="fa-regular fa-image text-4xl mb-3 opacity-50"></i>
+                                                <p className="text-[10px] uppercase tracking-widest font-bold">Preview Gambar Promosi</p>
+                                                <p className="text-xs mt-2 italic font-mono text-slate-400 dark:text-slate-600 max-w-xs opacity-70">"{result.image_prompt}"</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            <div className="bg-white dark:bg-slate-800 border border-dashed border-slate-300 dark:border-slate-600 rounded-3xl flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500 p-10 opacity-70">
+                                <i className="fa-brands fa-instagram text-5xl mb-4"></i>
+                                <p className="text-sm font-medium text-center">Atur konfigurasi di panel sebelah kiri untuk mulai menghasilkan materi promosi.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // HOOK GENERATOR
+        // ==========================================
+        function HookGeneratorView({ selectedNovel, triggerToast, copyToClipboard }) {
+            const [loading, setLoading] = useState(false);
+            const [hooks, setHooks] = useState([]);
+
+            const handleHooks = async () => {
+                if (!selectedNovel) return;
+                setLoading(true);
+                const res = await callGemini(`Tulis 3 hook pancingan emosi singkat (1 kalimat) untuk promosi novel "${selectedNovel.title}" (Genre: ${selectedNovel.genre}) di sosial media. Hasilkan 3 baris teks saja.`);
+                if (res) setHooks(res.split('\n').filter(h => h.trim() !== ""));
+                setLoading(false);
+            };
+
+            return (
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 space-y-6 shadow-sm animate-fadeIn max-w-4xl mx-auto">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 border-b border-slate-200 dark:border-slate-700 pb-4">
+                        <div>
+                            <h3 className="font-black text-lg text-slate-800 dark:text-white flex items-center space-x-2">
+                                <span className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-500/20 text-orange-600 dark:text-orange-400 flex items-center justify-center"><i className="fa-solid fa-quote-left text-sm"></i></span>
+                                <span>Hook Generator Otomatis</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Hasilkan pancingan 3 detik pertama untuk mengunci perhatian audiens.</p>
+                        </div>
+                        <button onClick={handleHooks} disabled={loading} className="bg-orange-500 hover:bg-orange-600 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-orange-500/30 transition-transform transform hover:-translate-y-0.5">
+                            {loading ? <span className="loading-dots">Menganalisis</span> : "Generate Hook ✨"}
+                        </button>
+                    </div>
+                    <div className="space-y-4">
+                        {hooks.map((h, i) => (
+                            <div key={i} className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm flex justify-between items-center group transition-colors hover:border-orange-300 dark:hover:border-orange-700">
+                                <span className="italic text-slate-700 dark:text-slate-300 font-medium font-serif-novel text-base">"{h.replace(/^\d+[\.\s\-]+/, '')}"</span>
+                                <button onClick={() => copyToClipboard(h)} className="text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-500/10 p-2 rounded-lg transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 shrink-0 ml-4"><i className="fa-solid fa-copy"></i></button>
+                            </div>
+                        ))}
+                        {hooks.length === 0 && (
+                            <div className="text-center py-10 text-slate-400 dark:text-slate-500"><p className="text-sm">Belum ada hook yang dihasilkan.</p></div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // COVER GENERATOR (WEB SEARCH + IMAGEN)
+        // ==========================================
+        function CoverGeneratorView({ selectedNovel, triggerToast }) {
+            const [loading, setLoading] = useState(false);
+            const [imgLoading, setImgLoading] = useState(false);
+            const [concept, setConcept] = useState(null);
+            const [coverImg, setCoverImg] = useState("");
+
+            const handleGenerateConcept = async () => {
+                if (!selectedNovel) return triggerToast("Pilih novel terlebih dahulu!", "error");
+                setLoading(true); setCoverImg("");
+                const prompt = `Cari tren sampul buku (cover novel) bergenre ${selectedNovel.genre} terbaru yang viral di internet tahun 2026. 
+                Buatkan 1 konsep untuk novel berjudul "${selectedNovel.title}" dengan sinopsis: "${selectedNovel.synopsis}".
+                Sediakan output MURNI JSON persis seperti ini:
+                {
+                    "trend": "Analisis tren web saat ini singkat",
+                    "visual_prompt": "Prompt bahasa inggris deskriptif untuk generator gambar AI tentang komposisi visual cover, professional, highly detailed.",
+                    "tagline": "Satu kalimat pendek bombastis"
+                }`;
+
+                const res = await callGemini(prompt, "Hanya kembalikan JSON. Gunakan Google Search Web AI.", true);
+                if (res) {
+                    try {
+                        const data = JSON.parse(res.substring(res.indexOf("{"), res.lastIndexOf("}") + 1));
+                        setConcept(data);
+                        triggerToast("Analisis tren web dan konsep berhasil dibuat!");
+                    } catch(e) {
+                        setConcept({ trend: "Gaya gelap bayangan minimalis (Fall-back)", visual_prompt: `A dramatic book cover background for novel ${selectedNovel.title}, empty space in middle for title, highly detailed, 8k.`, tagline: "Rahasia yang menghancurkan takdir." });
+                        triggerToast("Menggunakan fallback format JSON.", "info");
+                    }
+                }
+                setLoading(false);
+            };
+
+            const handleRenderCover = async () => {
+                if (!concept || !concept.visual_prompt) return;
+                setImgLoading(true);
+                triggerToast("Memproses AI Visual terintegrasi...", "info");
+                const res = await callImagen(concept.visual_prompt);
+                if (res) {
+                    setCoverImg(res);
+                    triggerToast("Latar belakang sampul siap!");
+                } else {
+                    setCoverImg("https://images.unsplash.com/photo-1543002588-bfa74002ed7e?auto=format&fit=crop&w=600&q=80");
+                    triggerToast("Menampilkan mockup cover visual.", "info");
+                }
+                setImgLoading(false);
+            };
+
+            return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn max-w-6xl mx-auto">
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm lg:col-span-5 flex flex-col space-y-6">
+                        <div>
+                            <h3 className="font-black text-lg text-slate-800 dark:text-white flex items-center space-x-3">
+                                <span className="w-8 h-8 rounded-lg bg-pink-100 dark:bg-pink-500/20 text-pink-600 dark:text-pink-400 flex items-center justify-center"><i className="fa-solid fa-globe text-sm"></i></span>
+                                <span>AI Web Search Cover</span>
+                            </h3>
+                            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">Gunakan alat pencarian Web AI terintegrasi gratis ini untuk meriset tren sampul viral terbaru, dan merender hasilnya langsung di peramban Anda.</p>
+                        </div>
+                        
+                        <button onClick={handleGenerateConcept} disabled={loading} className="w-full bg-pink-600 hover:bg-pink-700 text-white py-3.5 rounded-xl text-sm font-bold transition-all shadow-lg shadow-pink-500/30 transform hover:-translate-y-0.5 flex items-center justify-center">
+                            {loading ? <span className="loading-dots">Menganalisis Tren Web</span> : <span><i className="fa-solid fa-magnifying-glass mr-2"></i>Riset & Generate Konsep</span>}
+                        </button>
+
+                        {concept && (
+                            <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                                <div>
+                                    <strong className="text-slate-500 dark:text-slate-400 block mb-1 text-[10px] uppercase tracking-widest"><i className="fa-brands fa-google mr-1.5 text-pink-500"></i>Riset Tren Web</strong>
+                                    <p className="text-xs text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700">{concept.trend}</p>
+                                </div>
+                                <div>
+                                    <strong className="text-slate-500 dark:text-slate-400 block mb-1 text-[10px] uppercase tracking-widest"><i className="fa-solid fa-bolt mr-1.5 text-pink-500"></i>Tagline Promosi</strong>
+                                    <p className="text-sm font-serif-novel text-slate-800 dark:text-white font-bold italic">"{concept.tagline}"</p>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-8 shadow-sm lg:col-span-7 flex flex-col items-center justify-center relative overflow-hidden group">
+                        
+                        {concept && (
+                            <button onClick={handleRenderCover} disabled={imgLoading} className="absolute top-6 right-6 z-20 bg-slate-900 hover:bg-black text-white dark:bg-white dark:hover:bg-slate-200 dark:text-slate-900 px-4 py-2.5 rounded-xl text-xs font-bold shadow-lg transition-transform transform hover:-translate-y-0.5 flex items-center">
+                                {imgLoading ? <span className="loading-dots px-2">Merender Visual</span> : <span><i className="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Render Gambar Cover</span>}
+                            </button>
+                        )}
+                        
+                        <div className="w-[240px] h-[360px] bg-gradient-to-tr from-slate-800 via-slate-900 to-black rounded-2xl shadow-2xl relative border border-slate-700 overflow-hidden flex flex-col justify-between text-center p-5 transform transition-transform duration-500 group-hover:scale-105">
+                            {coverImg ? (
+                                <img src={coverImg} alt="Cover BG" className="absolute inset-0 w-full h-full object-cover z-0 opacity-85" />
+                            ) : (
+                                <div className="absolute inset-0 bg-slate-900 z-0"></div>
+                            )}
+
+                            <span className="z-10 text-[9px] text-pink-300 font-bold tracking-widest uppercase bg-black/60 py-1 px-2 rounded backdrop-blur-sm self-center">TRENDING CONCEPT</span>
+                            
+                            <div className="z-10 my-auto w-full flex flex-col items-center justify-center">
+                                <div className="bg-black/40 backdrop-blur-md p-4 rounded-xl border border-white/10 w-full">
+                                    <h4 className="font-black text-xl text-white leading-tight font-serif-novel uppercase drop-shadow-lg mb-2">{selectedNovel ? selectedNovel.title : "JUDUL"}</h4>
+                                    <div className="h-0.5 w-12 bg-pink-500 mx-auto mb-2 opacity-70"></div>
+                                    <p className="text-[10px] text-slate-200 italic font-medium">"{concept ? concept.tagline : "Tagline"}"</p>
+                                </div>
+                            </div>
+                            
+                            <span className="z-10 text-[8px] text-slate-300 font-bold uppercase tracking-widest">Novel Marketing AI</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ==========================================
+        // SETTINGS (ADMIN)
+        // ==========================================
+        function SettingsView({ triggerToast }) {
+            const [scriptUrl, setScriptUrl] = useState("");
+            useEffect(() => { setScriptUrl(localStorage.getItem("novel_studio_script_url") || ""); }, []);
+            const handleSave = (e) => {
+                e.preventDefault();
+                localStorage.setItem("novel_studio_script_url", scriptUrl);
+                triggerToast("Tautan Cloud Workspace berhasil diperbarui!");
+            };
+            return (
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-3xl p-6 sm:p-10 space-y-6 max-w-xl mx-auto shadow-sm animate-fadeIn mt-8">
+                    <div className="text-center">
+                        <div className="w-12 h-12 bg-slate-100 dark:bg-slate-700 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-500 dark:text-slate-400"><i className="fa-solid fa-cloud text-xl"></i></div>
+                        <h3 className="font-black text-lg text-slate-800 dark:text-white">Konfigurasi Cloud Sheets</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Hubungkan UI generator ini dengan database Google Spreadsheet Anda.</p>
+                    </div>
+                    <form onSubmit={handleSave} className="space-y-4 text-sm">
+                        <div>
+                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest mb-2">Google Apps Script Web App URL</label>
+                            <input type="url" value={scriptUrl} onChange={(e) => setScriptUrl(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5 text-slate-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors" placeholder="https://script.google.com/macros/s/.../exec" required />
+                        </div>
+                        <button type="submit" className="w-full bg-slate-800 dark:bg-white text-white dark:text-slate-900 hover:bg-black dark:hover:bg-slate-200 py-3.5 rounded-xl font-bold shadow-lg transition-transform transform hover:-translate-y-0.5">Simpan Konfigurasi</button>
+                    </form>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
